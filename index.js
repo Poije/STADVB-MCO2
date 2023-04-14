@@ -10,10 +10,10 @@ var corOption = {
 }
 
 const connection = mysql.createPool({
-    host: 'localhost',
+    host: '34.126.65.162',
     user: 'root',
-    password: '1234567890',
-    database: 'imdb_ijs'
+    password: 'allmovies',
+    database: 'all-movies'
 });
 
 
