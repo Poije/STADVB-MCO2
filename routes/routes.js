@@ -1,17 +1,18 @@
-import { Router } from "express";
-import mainController from "../controllers/mainController.js";
-import dbController from "../controllers/dbController.js";
+const express = require ('express');
 
-const router = Router ();
+const mainController = require ('../controllers/mainController.js');
+const dbController = require ("../controllers/dbController.js");
 
-router.get ('/', mainController.getMainPage);
+const app = express ();
 
-router.get ('/editMovie', mainController.getEdit);
-router.get ('/addMovie', mainController.getAdd);
+app.get ('/', mainController.getMainPage);
 
-router.post ('/select', dbController.select);
-router.post ('/insert', dbController.insert);
-router.post ('/update', dbController.update);
-router.post ('/delete', dbController.delete);
+app.get ('/editMovie', mainController.getEdit);
+app.get ('/addMovie', mainController.getAdd);
 
-export default router;
+app.post ('/select', dbController.select);
+app.post ('/insert', dbController.insert);
+app.post ('/update', dbController.update);
+app.post ('/delete', dbController.delete);
+
+module.exports = app;
