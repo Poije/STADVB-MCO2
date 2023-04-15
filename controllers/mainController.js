@@ -12,4 +12,4 @@ const mainController = {
     }
 };
 
-export default mainController;
+module.exports = mainController;
