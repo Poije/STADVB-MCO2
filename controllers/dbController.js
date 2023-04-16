@@ -30,8 +30,10 @@ let mainConnection;
 let beforeConnection;
 let afterConnection;
 let connectionToUse;
-const limitCount = " LIMIT 1000";
-const lockCheck = " FOR UPDATE";
+const limitCount = " LIMIT 1000;";
+const lockCheck = " FOR UPDATE;";
+let nodeQueue = [];
+let mainQueue = [];
 
 function acquireMainConnection () {
     return new Promise ((resolve, reject) => {
@@ -100,51 +102,158 @@ function selectNodeOnYear (year) {
 }
 
 function buildSelectQuery (body) {
-        let nonEmptyParams;
-        for (const key in body) {
-            if (body.key !== '')
-                nonEmptyParams++;
-        }
-        console.log ("Param count: " + nonEmptyParams);
-        if (nonEmptyParams == 0)
-            return (["SELECT * FROM movies", []]);
-        else {
-            const keys = Object.keys (body);
-            let query = "SELECT * FROM movies WHERE ";
-            let values = [];
-            for (let i = 0; i < keys.length; i++) {
-                if (keys[i] === 'id' && body.id.trim ().length !== 0) {
-                    query += "id = ?";
-                    values.push (body.id.trim ());
-                    if (i !== keys.length - 1)
-                        query += " AND ";
-                }
-                else if (keys[i] === 'name' && body.name.trim ().length !== 0) {
-                    query += "name LIKE ?";
-                    values.push ("%" + body.name + "%");
-                    if (i !== keys.length - 1)
-                        query += " AND ";
-                }
-                else if (keys[i] === 'year' && body.year.trim ().length !== 0) {
-                    query += "year = ?";
-                    values.push (parseInt (body.year.trim ()));
-                    if (i !== keys.length - 1)
-                        query += " AND ";
-                }
-                else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
-                    query += "rank = ?";
-                    values.push (parseFloat (body.rank.trim ()));
-                    if (i !== keys.length - 1)
-                        query += " AND ";
-                }
+    let nonEmptyParams = 0;
+    for (const key in body) {
+        if (body.key !== '')
+            nonEmptyParams++;
+    }
+    console.log ("Param count: " + nonEmptyParams);
+    if (nonEmptyParams == 0)
+        return (["SELECT * FROM movies", []]);
+    else {
+        const keys = Object.keys (body);
+        let query = "SELECT * FROM movies WHERE ";
+        let values = [];
+        for (let i = 0; i < keys.length; i++) {
+            if (keys[i] === 'id' && body.id.trim ().length !== 0) {
+                query += "id = ?";
+                values.push (body.id.trim ());
+                if (i !== keys.length - 1)
+                    query += " AND ";
             }
+            else if (keys[i] === 'name' && body.name.trim ().length !== 0) {
+                query += "name LIKE ?";
+                values.push ("%" + body.name + "%");
+                if (i !== keys.length - 1)
+                    query += " AND ";
+            } 
+            else if (keys[i] === 'year' && body.year.trim ().length !== 0) {
+                query += "year = ?";
+                values.push (parseInt (body.year.trim ()));
+                if (i !== keys.length - 1)
+                    query += " AND ";
+            }
+            else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
+                query += "rank = ?";
+                values.push (parseFloat (body.rank.trim ()));
+                if (i !== keys.length - 1)
+                    query += " AND ";
+            }
+        }
 
-            return ([query, values]);
-        }   
+        return ([query, values]);
+    }
 }
 
-function buildDeleteQuery (body) {
+function buildInsertQuery (body) {
+    const keys = Object.keys (body);
+    let values = [];
+    let query = "INSERT INTO movies (name, year, movie_rank) VALUES (?, ?, ?) WHERE id = ?"
 
+    values.push (body.name.trim ())
+    values.push (parseInt (body.year.trim ()));
+    values.push (parseFloat (body.rank.trime ()));
+    // for (let i = 0; i < keys.length; i++) {          //tinamad na ako iautomate hehe
+    //     if (keys[i] === 'name' && body.name.trim ().length !== 0) {
+    //         query += "name = ?";
+    //         values.push (body.name);
+    //         if (i !== keys.length - 1)
+    //             query += ", ";
+    //     }
+    //     else if (keys[i] === 'year' && body.year.trim ().length !== 0) {
+    //         query += "year = ?";
+    //         values.push (parseInt (body.year.trim ()));
+    //         if (i !== keys.length - 1)
+    //             query += ", ";
+    //     }
+    //     else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
+    //         query += "rank = ?";
+    //         values.push (parseFloat (body.rank.trim ()));
+    //         if (i !== keys.length - 1)
+    //             query += ", ";
+    //     }
+    // }
+}
+
+function buildUpdateQuery (body) {
+    const keys = Object.keys (body);
+    let query = "UPDATE movies SET ";
+    let values = [];
+
+    for (let i = 0; i < keys.length; i++) {
+        if (keys[i] === 'name' && body.name.trim ().length !== 0) {
+            query += "name = ?";
+            values.push (body.name);
+            if (i !== keys.length - 1)
+                query += ", ";
+        }
+        else if (keys[i] === 'year' && body.year.trim ().length !== 0) {
+            query += "year = ?";
+            values.push (parseInt (body.year.trim ()));
+            if (i !== keys.length - 1)
+                query += ", ";
+        }
+        else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
+            query += "rank = ?";
+            values.push (parseFloat (body.rank.trim ()));
+            if (i !== keys.length - 1)
+                query += ", ";
+        }
+    }
+
+    query += " WHERE id = ?";
+    values.push (parseInt (body.id));
+
+    return ([query, values]);
+}
+
+function buildDeleteQuery (id) {
+    const query = "DELETE FROM movies WHERE id = ?";
+    const values = [id];
+    return [query, values];
+}
+
+function performQuery (connection, connectionName, query, values) {
+    return new Promise ((resolve, reject) => {
+        setIsolationLevel (connectionName, "REPEATABLE READ").then (result => {
+            connection.query (query + lockCheck, values, (err, lockResult) => {
+                console.log (query + lockCheck);
+                console.log (values);
+                if (lockResult.length !== 0) {
+                    connection.beginTransaction (err => {
+                        if (err) reject (err);
+    
+                        connection.query (query + limitCount, values, (err, results) => {
+                            console.log (query);
+                            console.log (values);
+                            console.log (results);
+                            if (err) {
+                                connection.rollback ();
+                                connection.close ();
+                                console.log (query.split (" ")[0].toLowerCase () + ' transaction was rolled back1');
+                                reject (err);
+                            }
+    
+                            connection.commit (err => {
+                                if (err) {
+                                    connection.rollback ();
+                                    connection.close ();
+                                    console.log (query.split (" ")[0].toLowerCase () + ' transaction was rolled back2');
+                                    reject (err);
+                                }
+                            });
+    
+                            console.log (query.split (" ")[0].toLowerCase () + ' transaction was successful');
+                            connection.close ();
+                            resolve ("success");
+                        });
+                    });
+                }
+                else
+                    reject ("locked");
+            }); 
+        });
+    });
 }
 
 function setIsolationLevel (connection, level) {
@@ -197,96 +306,138 @@ const dbController = {
         let useBackup = false;
         awaitAllConnections () .then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
-                setIsolationLevel ('main', "REPEATABLE READ").then (result => {
-                    mainConnection.query (query + lockCheck, values, (err, results) => {
-                        console.log (results);
-                        if (results.length === 0) {
-                            mainConnection.beginTransaction (err => {
-                                if (err) throw err;
-        
-                                mainConnection.query (query + limitCount, values, (err, results) => {
-                                    console.log (query);
-                                    console.log (values);
-                                    console.log (results);
-                                    console.log (useBackup);
-                                    if (err) {
-                                        mainConnection.rollback ();
-                                        console.log (err);
-                                        console.log ('Select transaction was rolled back2');
-                                        mainConnection.close ();
-                                    }
-        
-                                    mainConnection.commit (err => {
-                                        if (err) {
-                                            mainConnection.rollback ();
-                                            console.log (err);
-                                            console.log ('Select transaction was rolled back3');
-                                            mainConnection.close ();
-                                        }
-                                    });
-        
-                                    console.log ("Select query successful");
-                                    mainConnection.close ();
-                                });
-                            });
-                        }
-                        else
-                            useBackup = true;
-                    });
-                    
+                performQuery (mainConnection, 'main', query, values)
+                .then (() => {
+                    useBackup = false;
+                })
+                .catch (() => {
+                    useBackup = true;
                 });
             }
+
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
-                selectNodeOnYear (parseInt (req.body.year)).then (connection => {
-                    setIsolationLevel (parseInt (req.body.year) < 1980 ? 'before' : 'after', "REPEATABLE READ").then (results => {
-                        connection.beginTransaction (err => {
-                            if (err) throw err;
-    
-                            connection.query (query, values, (err, results) => {
-                                console.log (query);
-                                console.log (values);
-                                console.log (results);
-                                console.log ("Backup " + useBackup);
-                                if (err) {
-                                    connection.rollback ();
-                                    console.log (err);
-                                    console.log ('Select transaction was rolled back2');
-                                    connection.close ();
-                                }
-    
-                                connection.commit (err => {
-                                    if (err) {
-                                        connection.rollback ();
-                                        console.log (err);
-                                        console.log ('Select transaction was rolled back3');
-                                        connection.close ();
-                                    }
-                                });
-    
-                                console.log ("Select query successful");
-                                connection.close ();
-                            });
-                        });
-                    });
-                });
+                const before1980 = parseInt (req.body.year) < 1980
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                    useBackup = false;
+                })
             }
         });
-
         res.render ('index2');
     },
 
     insert: async (req, res) => {
-        awaitAllConnections ().then (results => {
+        req.body = {
+            id: 1284,
+            name: '18 and Nasty Interracial 63',
+            year: 2002
+        }
 
+        const [query, values] = buildUpdateQuery (req.body);
+        awaitAllConnections ().then (results => {
+            if (results[0].status !== 'rejected') {     //main node is down
+                performQuery (mainConnection, 'main', query, values)
+                .then (() => {
+                    useBackup = false;
+                    
+                    nodeQueue.push ({
+                        query: query,
+                        values: values,
+                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
+                    });
+                })
+                .catch (() => {
+                    useBackup = true;
+                });
+            }
+
+            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                const before1980 = parseInt (req.body.year) < 1980
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                    useBackup = false;
+
+                    mainQueue.push ({
+                        query: query,
+                        values: values
+                    });
+                })
+            }
         });
     },
 
     update: (req, res) => {
+        let useBackup = false;
+        req.body = {
+            id: '1284',
+            name: '18 and Nasty Interracial 63',
+            year: '2002'
+        }
 
+        const [query, values] = buildUpdateQuery (req.body);
+        awaitAllConnections ().then (results => {
+            if (results[0].status !== 'rejected') {     //main node is down
+                performQuery (mainConnection, 'main', query, values)
+                .then (() => {
+                    useBackup = false;
+                    
+                    nodeQueue.push ({
+                        query: query,
+                        values: values,
+                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
+                    });
+                })
+                .catch (() => {
+                    useBackup = true;
+                });
+            }
+
+            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                const before1980 = parseInt (req.body.year) < 1980
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                    useBackup = false;
+
+                    mainQueue.push ({
+                        query: query,
+                        values: values
+                    });
+                })
+            }
+        });
     },
 
     delete: (req, res) => {
-        
+        const [query, values] = buildDeleteQuery (req.body);
+        let useBackup = false;
+        awaitAllConnections () .then (results => {
+            if (results[0].status !== 'rejected') {     //main node is down
+                performQuery (mainConnection, 'main', query, values)
+                .then (() => {
+                    useBackup = false;
+                    
+                    nodeQueue.push ({
+                        query: query,
+                        values: values,
+                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
+                    });
+                })
+                .catch (() => {
+                    useBackup = true;
+                });
+            }
+
+            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                const before1980 = parseInt (req.body.year) < 1980
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                    useBackup = false;
+
+                    mainQueue.push ({
+                        query: query,
+                        values: values
+                    });
+                })
+            }
+        });
+
+        res.render ('index2');
     }
 };
 
