@@ -1,0 +1,10 @@
+{{#each results}}
+<tr>
+    <td class="tableID">{{id}}</td>
+    <td class="tableName">{{name}}</td>
+    <td class="tableYear">{{year}}</td>
+    <td class="tableRank">{{movie_rank}}</td>
+    <td class="tableEdit"><a href="/editMovie?id={{id}}&year={{year}}&rank={{movie_rank}}&name={{name}}">Edit</a></td>
+    <td onclick="deleteMovie({{id}})" class="deleteButton">Delete</td>
+</tr>
+{{/each}}
