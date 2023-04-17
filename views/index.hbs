@@ -1,11 +1,37 @@
+<!DOCTYPE html>
 <html>
     <head>
         <title>Movies app</title>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <link rel="stylesheet" type="text/css" media="all" src="/css/index.css"
     </head>
     <body>
         <h1>INDEX PAGE FOR MOVIES APP</h1>
-        <script>
-            window.location.href = "/insert";
-        </script>
+        <h2>Search for a movie or <a href="/addMovie">add a movie</a></h2>
+        <form id="searchMovie">
+            ID: <input type="text" id="id" name="id" placeholder="ID in database">
+            Movie: <input type="text" id="name" name="name" placeholder="New movie name">
+            <br>
+            Year (YYYY):<input type="text" id="year" name="year" placeholder="Year in YYYY">
+            Rank: <input type="text" id="rank" name="rank" placeholder="Rank out of 10.0">
+            <br>
+            <button onclick="submitSearch ()">Submit</button>
+        </form>
+
+        <table id="resultTable">
+            <tbody>
+                <tr>
+                    <td class="tableHeader">ID</td>
+                    <td class="tableHeader">Movie name</td>
+                    <td class="tableHeader">Year</td>
+                    <td class="tableHeader">Rank</td>
+                    <td class="tableHeader" colspan="2">Actions</td>
+                </tr>
+
+            </tbody>
+        </table>
+
+        <script src="/js/index.js"></script>
+        <script src="/js/replicate.js"></script>
     </body>
 </html>
