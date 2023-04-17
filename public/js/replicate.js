@@ -29,4 +29,4 @@ executePostRequest();
 // Set interval to call the function every 10 seconds (10000 milliseconds)
 setInterval(() => {
     executePostRequest();
-}, 10000);
+}, 30000);

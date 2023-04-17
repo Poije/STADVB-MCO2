@@ -29,6 +29,7 @@ poolCluster.add ('AFTER1980', connectionAfter1980);
 let mainConnection;
 let beforeConnection;
 let afterConnection;
+const isolationLevel = "REPEATABLE READ"
 
 const limitCount = " LIMIT 50";
 const lockCheck = " FOR UPDATE";
@@ -38,9 +39,10 @@ let mainQueue = [];
 function acquireMainConnection () {
     return new Promise ((resolve, reject) => {
         poolCluster.getConnection ('MAIN', (err, connection) => {
+            console.log ("im trying");
             if (err) {
                 console.log ('Failed to connect to main, proceeding to backup nodes.', err);
-                reject ("mainFail");
+                reject (err);
             }
             else {
                 console.log ('Connection to the main node successful');
@@ -85,11 +87,15 @@ function acquireAfterConnection () {
 
 function awaitAllConnections () {
     return new Promise ((resolve, reject) => {
-        if (typeof mainConnection !== 'undefined')
-            mainConnection.close ();
+        if (typeof mainConnection !== 'undefined') {
+            mainConnection.release ();
+            mainConnection.destroy ();
+        }
         if (typeof beforeConnection !== 'undefined') {
-            beforeConnection.close ();
-            afterConnection.close ();
+            beforeConnection.release ();
+            afterConnection.release ();
+            beforeConnection.destroy ();
+            afterConnection.destroy ();
         }
         
         Promise.allSettled ([acquireMainConnection (), acquireBeforeConnection (), acquireAfterConnection ()])
@@ -257,7 +263,7 @@ function buildDeleteQuery (id) {
 
 function performQuery (connection, connectionName, lockQuery, lockValues, query, values) {
     return new Promise ((resolve, reject) => {
-        setIsolationLevel (connectionName, "REPEATABLE READ").then (result => {
+        setIsolationLevel (connectionName, isolationLevel).then (result => {
             //NEED OWN SELECT FOR UPDATE QUERY STRING
             connection.query (lockQuery, lockValues, (lockErr, lockResult) => {
                 console.log ();
@@ -276,7 +282,8 @@ function performQuery (connection, connectionName, lockQuery, lockValues, query,
                             console.log (results);
                             if (queryErr) {
                                 connection.rollback ();
-                                connection.close ();
+                                connection.release ()
+                                connection.destroy ();
                                 console.log (queryType + ' transaction was rolled back1');
                                 reject (queryErr);
                                 return;
@@ -285,7 +292,8 @@ function performQuery (connection, connectionName, lockQuery, lockValues, query,
                             connection.commit (commitErr => {
                                 if (commitErr) {
                                     connection.rollback ();
-                                    connection.close ();
+                                    connection.release ()
+                                    connection.destroy ();
                                     console.log (queryType + ' transaction was rolled back2');
                                     reject (commitErr);
                                     return;
@@ -293,7 +301,8 @@ function performQuery (connection, connectionName, lockQuery, lockValues, query,
                             });
     
                             console.log (queryType + ' transaction to ' + connectionName + ' was successful');
-                            connection.close ();
+                            connection.release ();
+                            connection.destroy ();
                             resolve (results);
                             return;
                         });
@@ -367,7 +376,7 @@ const dbController = {
 
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
                 const before1980 = parseInt (req.body.year) < 1980
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values, query, values).then ((results) => {
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query + limitCount + lockCheck, values, query + limitCount, values).then ((results) => {
                     res.send (results);
                     useBackup = false;
                     return;
@@ -407,6 +416,7 @@ const dbController = {
                 }
 
                 if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                    console.log ("using backup");
                     performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', lockQuery, lockValues, query, values).then (() => {
                         useBackup = false;
 
@@ -518,44 +528,203 @@ const dbController = {
     },
 
     replicate: async (req, res) => {
-        awaitAllConnections () .then (results => {
-            while (nodeQueue.length !== 0 || mainQueue.length !== 0) {
-                if (nodeQueue.length !== 0) {
-                    const transaction = nodeQueue[0];
-                    const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
-                    console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
-                    console.log (transaction);
-                    nodeQueue.shift ();
-                    performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
-                    .then ((results) => {
-                        console.log ("succeeded in replicating to " + transaction.node + " node.");
-                    })
-                    .catch (() => {
-                        nodeQueue.unshift (transaction);
-                        res.send ("failed to replicate to " + transaction.node + " node.");
-                        return;
-                    })
-                }
+        res.send ("replic");
+        return;
+        // replication v3
+        // while (nodeQueue.length !== 0) {
+        //     const transaction = nodeQueue[0];
+        //     if (typeof beforeConnection !== 'undefined') {
+        //         const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //         console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //         console.log (transaction);
+        //         nodeQueue.shift ();
+        //         performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //         .then ((results) => {
+        //             console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //         })
+        //         .catch (() => {
+        //             nodeQueue.unshift (transaction);
+        //             res.send ("failed to replicate to " + transaction.node + " node.");
+        //             return;
+        //         });
+        //     }
+        //     else {
+        //         Promise.allSettled ([acquireBeforeConnection (), acquireAfterConnection ()])
+        //         .then (conResults => {
+        //             const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //             console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //             console.log (transaction);
+        //             nodeQueue.shift ();
+        //             performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //             .then ((results) => {
+        //                 console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //             })
+        //             .catch (() => {
+        //                 nodeQueue.unshift (transaction);
+        //                 res.send ("failed to replicate to " + transaction.node + " node.");
+        //                 return;
+        //             });
+        //         })
+        //         .catch (() => {
+        //             console.log ()
+        //             res.send ("failed to connect to " + transaction.node + " node.");
+        //             return;
+        //         });
 
-                if (mainQueue.length !== 0) {
-                    const transaction = mainQueue[0];
-                    mainQueue.shift ();
-                    performQuery (mainConnection, 'main', transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
-                    .then ((results) => {
-                        console.log ("succeeded in replicating to main");
-                    })
-                    .catch (() => {
-                        mainQueue.unshift (transaction);
-                        res.send ("failed to replicate to main");
-                        return;
-                    });
-                }
-            }
+        //         if (typeof beforeConnection === 'undefined')
+        //             break;
+        //     }
+        // }
 
-            console.log ("all nodes are up to date");
-            res.send ("all nodes are up to date");
-            return;
-        });
+        // while (mainQueue.length !== 0) {
+        //     const transaction = mainQueue[0];
+        //     if (typeof mainConnection !== 'undefined') {
+        //         const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //         console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //         console.log (transaction);
+        //         nodeQueue.shift ();
+        //         performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //         .then ((results) => {
+        //             console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //         })
+        //         .catch (() => {
+        //             nodeQueue.unshift (transaction);
+        //             res.send ("failed to replicate to " + transaction.node + " node.");
+        //             return;
+        //         });
+        //     }
+        //     else {
+        //         acquireMainConnection ()
+        //         .then (conResults => {
+        //             const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //             console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //             console.log (transaction);
+        //             nodeQueue.shift ();
+        //             performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //             .then ((results) => {
+        //                 console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //             })
+        //             .catch (() => {
+        //                 nodeQueue.unshift (transaction);
+        //                 res.send ("failed to replicate to " + transaction.node + " node.");
+        //                 return;
+        //             });
+        //         })
+        //         .catch ((error) => {
+        //             console.log (error);
+        //             // res.send ("failed to replicate to " + transaction.node + " node.");
+        //             return;
+        //         });
+
+        //         if (typeof mainConnection === 'undefined')
+        //             break;
+        //     }
+        // }
+
+        //replication v2
+        // awaitAllConnections () .then (results => {
+        //     while (nodeQueue.length !== 0 && typeof beforeConnection !== 'undefined') {
+        //         const transaction = nodeQueue[0];
+        //         Promise.allSettled ([acquireBeforeConnection (), acquireAfterConnection ()])
+        //         .then (conResults => {
+        //             const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //             console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //             console.log (transaction);
+        //             nodeQueue.shift ();
+        //             performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //             .then ((results) => {
+        //                 console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //             })
+        //             .catch (() => {
+        //                 nodeQueue.unshift (transaction);
+        //                 res.send ("failed to replicate to " + transaction.node + " node.");
+        //                 return;
+        //             });
+        //         })
+        //         .catch (() => {
+        //             console.log ()
+        //             res.send ("failed to replicate to " + transaction.node + " node.");
+        //             return;
+        //         });   
+        //     }
+
+        //     while (mainQueue.length !== 0 && typeof mainConnection !== 'undefined') {
+        //         const transaction = mainQueue[0];
+        //         acquireMainConnection.then (() => {
+        //             mainQueue.shift ();
+        //             performQuery (mainConnection, 'main', transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //             .then ((results) => {
+        //                 console.log ("succeeded in replicating to main");
+        //             })
+        //             .catch (() => {
+        //                 mainQueue.unshift (transaction);
+        //                 res.send ("failed to replicate to main");
+        //                 return;
+        //             });
+        //         })
+        //         .catch (() => {
+        //             console.log ("failed to replicate to main");
+        //             res.send ("failed to replicate to main");
+        //             return;
+        //         });   
+        //     }
+        // });
+
+        // replication v1
+        // while (nodeQueue.length !== 0 && )
+        //  awaitAllConnections () .then (results => {
+        //     while (nodeQueue.length !== 0 || mainQueue.length !== 0) {
+        //         if (nodeQueue.length !== 0) {
+        //             const transaction = nodeQueue[0];
+        //             Promise.allSettled ([acquireBeforeConnection (), acquireAfterConnection ()])
+        //             .then (conResults => {
+        //                 const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+        //                 console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+        //                 console.log (transaction);
+        //                 nodeQueue.shift ();
+        //                 performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //                 .then ((results) => {
+        //                     console.log ("succeeded in replicating to " + transaction.node + " node.");
+        //                 })
+        //                 .catch (() => {
+        //                     nodeQueue.unshift (transaction);
+        //                     res.send ("failed to replicate to " + transaction.node + " node.");
+        //                     return;
+        //                 });
+        //             })
+        //             .catch (() => {
+        //                 console.log ()
+        //                 res.send ("failed to replicate to " + transaction.node + " node.");
+        //                 return;
+        //             });   
+        //         }
+
+        //         if (mainQueue.length !== 0 && typeof mainConnection) {
+        //             const transaction = mainQueue[0];
+        //             acquireMainConnection.then (() => {
+        //                 mainQueue.shift ();
+        //                 performQuery (mainConnection, 'main', transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+        //                 .then ((results) => {
+        //                     console.log ("succeeded in replicating to main");
+        //                 })
+        //                 .catch (() => {
+        //                     mainQueue.unshift (transaction);
+        //                     res.send ("failed to replicate to main");
+        //                     return;
+        //                 });
+        //             })
+        //             .catch (() => {
+        //                 console.log ("failed to replicate to main");
+        //                 res.send ("failed to replicate to main");
+        //                 return;
+        //             });   
+        //         }
+        //     }
+
+        //     console.log ("all nodes are up to date");
+        //     res.send ("all nodes are up to date");
+        //     return;
+        // });
     }
 };
 
