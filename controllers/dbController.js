@@ -95,12 +95,6 @@ function awaitAllConnections () {
     })
 }
 
-function selectNodeOnYear (year) {
-    return new Promise ((resolve, reject) => {
-        resolve (year < 1980 ? beforeConnection : afterConnection);
-    });
-}
-
 async function getNewestId () {
     return new Promise ((resolve, reject) => {
         let ids = [];
@@ -133,7 +127,7 @@ async function getNewestId () {
 }
 
 function buildLockQuery (id) {
-    return ["SELECT * FROM movies WHERE id = ?", [parseInt (id)]];
+    return ["SELECT * FROM movies WHERE id = ? " + lockCheck, [parseInt (id)]];
 }
 function buildSelectQuery (body) {
     let nonEmptyParams = 0;
@@ -291,9 +285,9 @@ function performQuery (connection, connectionName, lockQuery, lockValues, query,
                                 }
                             });
     
-                            console.log (queryType + ' transaction was successful');
+                            console.log (queryType + ' transaction to ' + connectionName + ' was successful');
                             connection.close ();
-                            resolve ("success");
+                            resolve (results);
                             return;
                         });
                     });
@@ -355,8 +349,10 @@ const dbController = {
         awaitAllConnections () .then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
                 performQuery (mainConnection, 'main', query, values, query, values)
-                .then (() => {
+                .then ((results) => {
+                    res.send (results);
                     useBackup = false;
+                    return;
                 })
                 .catch (() => {
                     useBackup = true;
@@ -365,21 +361,15 @@ const dbController = {
 
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
                 const before1980 = parseInt (req.body.year) < 1980
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values, query, values).then (() => {
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values, query, values).then ((results) => {
+                    res.send (results);
                     useBackup = false;
                 })
             }
         });
-        res.render ('index2');
     },
 
     insert: async (req, res) => {
-        req.body = {
-            name: 'The Super Mario Bros.',
-            year: '2023',
-            rank: '7.4'
-        }
-
         const before1980 = parseInt (req.body.year) < 1980;
         let useBackup = false;
         awaitAllConnections ().then (results => {
@@ -400,7 +390,9 @@ const dbController = {
                             lockValues: lockValues
                         });
 
-                        res.send ("success to main");
+                        console.log ('succeeded inserting to main: ');
+                        console.log (query);
+                        res.redirect ('/');
                     })
                     .catch (() => {
                         useBackup = true;
@@ -418,7 +410,10 @@ const dbController = {
                             lockValues: lockValues
                         });
 
-                        res.send ("success to backup");
+                        
+                        console.log ('succeeded inserting to' + (before1980) ? 'before' : 'after' + 'node: ');
+                        console.log (query);
+                        res.redirect ('/');
                     });
                 }
             });
@@ -476,7 +471,7 @@ const dbController = {
     delete: async (req, res) => {
         let useBackup = false;
         req.body = {
-            id: '412323',
+            id: '412324',
             year: '2023'
         }
 
@@ -525,32 +520,36 @@ const dbController = {
                 if (nodeQueue.length !== 0) {
                     const transaction = nodeQueue[0];
                     const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+                    console.log ("tracsaciont tp be repliacated to " + transaction.node + " node:");
+                    console.log (transaction);
+                    nodeQueue.shift ();
                     performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
-                    .then (() => {
-                        nodeQueue.shirt ();
-                        res.send ("succeeded in replicating to " + transaction.node + " node.");
-                        return;
+                    .then ((results) => {
+                        console.log ("succeeded in replicating to " + transaction.node + " node.");
                     })
                     .catch (() => {
+                        nodeQueue.unshift (transaction);
                         res.send ("failed to replicate to " + transaction.node + " node.");
+                        return;
                     })
                 }
 
                 if (mainQueue.length !== 0) {
                     const transaction = mainQueue[0];
+                    mainQueue.shift ();
                     performQuery (mainConnection, 'main', transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
-                    .then (() => {
-                        mainQueue.shift ();
-                        res.send ("succeeded in replicating to main");
-                        return;
+                    .then ((results) => {
+                        console.log ("succeeded in replicating to main");
                     })
                     .catch (() => {
+                        mainQueue.unshift (transaction);
                         res.send ("failed to replicate to main");
                         return;
                     });
                 }
             }
 
+            console.log ("all nodes are up to date");
             res.send ("all nodes are up to date");
             return;
         });
