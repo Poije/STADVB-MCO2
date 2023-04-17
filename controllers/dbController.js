@@ -101,6 +101,37 @@ function selectNodeOnYear (year) {
     });
 }
 
+async function getNewestId () {
+    return new Promise ((resolve, reject) => {
+        let ids = [];
+        const queryPromise = (connection) => {
+            return new Promise((resolve, reject) => {
+                connection.query("SELECT MAX(id) AS last_id FROM movies", (err, result) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(result[0].last_id);
+                    }
+                });
+            });
+        };
+
+        const mainQuery = typeof mainConnection !== 'undefined' ? queryPromise(mainConnection) : Promise.resolve(null);
+        const beforeQuery = typeof beforeConnection !== 'undefined' ? queryPromise(beforeConnection) : Promise.resolve(null);
+        const afterQuery = typeof afterConnection !== 'undefined' ? queryPromise(afterConnection) : Promise.resolve(null);
+
+        Promise.all([mainQuery, beforeQuery, afterQuery])
+        .then(results => {
+            ids = results.filter(id => id !== null);
+            resolve (Math.max(...ids) + 1);
+        })
+        .catch(err => {
+            reject(err);
+        });
+    });
+    
+}
+
 function buildLockQuery (id) {
     return ["SELECT * FROM movies WHERE id = ?", [parseInt (id)]];
 }
@@ -137,26 +168,32 @@ function buildSelectQuery (body) {
                     query += " AND ";
             }
             else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
-                query += "rank = ?";
+                query += "movie_rank = ?";
                 values.push (parseFloat (body.rank.trim ()));
                 if (i !== keys.length - 1)
                     query += " AND ";
             }
         }
 
-        return ([query, values]);
+        return ([query + limitCount, values]);
     }
 }
 
 function buildInsertQuery (body) {
     const keys = Object.keys (body);
     let values = [];
-    let query = "INSERT INTO movies (name, year, movie_rank) VALUES (?, ?, ?) WHERE id = ?"
+    let query = "INSERT INTO movies (id, name, year, movie_rank) VALUES (?, ?, ?, ?)"
 
-    values.push (body.name.trim ())
-    values.push (parseInt (body.year.trim ()));
-    values.push (parseFloat (body.rank.trim ()));
-    values.push (getLatestId)
+    return new Promise ((resolve, reject) => {
+        getNewestId ().then (result => {
+            values.push (result);
+            values.push (body.name.trim ())
+            values.push (parseInt (body.year.trim ()));
+            values.push (parseFloat (body.rank.trim ()));
+            resolve ([query, values]);
+        });
+    });
+
     // for (let i = 0; i < keys.length; i++) {          //tinamad na ako iautomate hehe
     //     if (keys[i] === 'name' && body.name.trim ().length !== 0) {
     //         query += "name = ?";
@@ -171,7 +208,7 @@ function buildInsertQuery (body) {
     //             query += ", ";
     //     }
     //     else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
-    //         query += "rank = ?";
+    //         query += "movie_rank = ?";
     //         values.push (parseFloat (body.rank.trim ()));
     //         if (i !== keys.length - 1)
     //             query += ", ";
@@ -198,7 +235,7 @@ function buildUpdateQuery (body) {
                 query += ", ";
         }
         else if (keys[i] === 'rank' && body.rank.trim ().length !== 0) {
-            query += "rank = ?";
+            query += "movie_rank = ?";
             values.push (parseFloat (body.rank.trim ()));
             if (i !== keys.length - 1)
                 query += ", ";
@@ -221,35 +258,43 @@ function performQuery (connection, connectionName, lockQuery, lockValues, query,
     return new Promise ((resolve, reject) => {
         setIsolationLevel (connectionName, "REPEATABLE READ").then (result => {
             //NEED OWN SELECT FOR UPDATE QUERY STRING
-            connection.query (lockQuery, lockValues, (err, lockResult) => {
-                console.log ("lockErr: " + err);
-                if (lockResult.length !== 0) {
-                    connection.beginTransaction (err => {
-                        if (err) reject (err);
+            connection.query (lockQuery, lockValues, (lockErr, lockResult) => {
+                console.log ();
+                console.log ("lockErr: " + lockErr);
+                console.log (lockResult.length);
+                const queryType = query.split(" ")[0].toLowerCase ();
+                if ((lockResult.length !== 0 && queryType !== 'insert') ||
+                    (lockResult.length === 0 && (queryType === 'insert' || queryType === 'select')) ) {
+                    connection.beginTransaction (transErr => {
+                        if (transErr) reject (transErr);
     
-                        connection.query (query + limitCount, values, (err, results) => {
+                        connection.query (query, values, (queryErr, results) => {
                             console.log (query);
                             console.log (values);
+                            console.log (queryErr);
                             console.log (results);
-                            if (err) {
+                            if (queryErr) {
                                 connection.rollback ();
                                 connection.close ();
-                                console.log (query.split (" ")[0].toLowerCase () + ' transaction was rolled back1');
-                                reject (err);
+                                console.log (queryType + ' transaction was rolled back1');
+                                reject (queryErr);
+                                return;
                             }
     
-                            connection.commit (err => {
-                                if (err) {
+                            connection.commit (commitErr => {
+                                if (commitErr) {
                                     connection.rollback ();
                                     connection.close ();
-                                    console.log (query.split (" ")[0].toLowerCase () + ' transaction was rolled back2');
-                                    reject (err);
+                                    console.log (queryType + ' transaction was rolled back2');
+                                    reject (commitErr);
+                                    return;
                                 }
                             });
     
-                            console.log (query.split (" ")[0].toLowerCase () + ' transaction was successful');
+                            console.log (queryType + ' transaction was successful');
                             connection.close ();
                             resolve ("success");
+                            return;
                         });
                     });
                 }
@@ -302,8 +347,7 @@ function setIsolationLevel (connection, level) {
 const dbController = {
     select: async (req, res) => {
         req.body = {        //test req body
-            year: '2002',
-            name: '18 and '
+            year: '2023'
         };
 
         const [query, values] = buildSelectQuery (req.body);
@@ -331,46 +375,49 @@ const dbController = {
 
     insert: async (req, res) => {
         req.body = {
-            id: '1284',
-            name: '18 and Nasty Interracial 63',
-            year: '2002'
+            name: 'The Super Mario Bros.',
+            year: '2023',
+            rank: '7.4'
         }
 
-        const [query, values] = buildUpdateQuery (req.body);
-        const [lockQuery, lockValues] = buildLockQuery (req.body.id);
         const before1980 = parseInt (req.body.year) < 1980;
         let useBackup = false;
         awaitAllConnections ().then (results => {
-            if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', lockQuery, lockValues, query, values)
-                .then (() => {
-                    useBackup = false;
-                    
-                    nodeQueue.push ({
-                        query: query,
-                        values: values,
-                        node: before1980 ? 'before' : 'after',
-                        lockQuery: lockQuery,
-                        lockValues: lockValues
-                    });
-                })
-                .catch (() => {
-                    useBackup = true;
-                });
-            }
+            buildInsertQuery (req.body).then ((buildResults) => {
+                const [query, values] = buildResults;
+                const [lockQuery, lockValues] = buildLockQuery (values[0]);
 
-            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
-                    useBackup = false;
-
-                    mainQueue.push ({
-                        query: query,
-                        values: values,
-                        lockQuery: lockQuery,
-                        lockValues: lockValues
+                if (results[0].status !== 'rejected') {     //main node is down
+                    performQuery (mainConnection, 'main', lockQuery, lockValues, query, values)
+                    .then (() => {
+                        useBackup = false;
+                        
+                        nodeQueue.push ({
+                            query: query,
+                            values: values,
+                            node: before1980 ? 'before' : 'after',
+                            lockQuery: lockQuery,
+                            lockValues: lockValues
+                        });
+                    })
+                    .catch (() => {
+                        useBackup = true;
                     });
-                })
-            }
+                }
+
+                if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                    performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', lockQuery, lockValues, query, values).then (() => {
+                        useBackup = false;
+
+                        mainQueue.push ({
+                            query: query,
+                            values: values,
+                            lockQuery: lockQuery,
+                            lockValues: lockValues
+                        });
+                    })
+                }
+            });
         });
     },
 
