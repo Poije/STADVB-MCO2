@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Edit a movie's details</title>
+    </head>
+
+    <body>
+        <h1>Edit a movie</h1>
+        <h3><a href="/">back to home</a></h2>
+        <form id="newMovie" method="post" action="/update">
+            ID: <input type="text" id="id" name="id" value="{{id}}" readonly>
+            <br>
+            Movie: <input type="text" id="name" name="name" placeholder="New movie name" value="{{name}}">
+            <br>
+            Year (YYYY):<input type="text" id="year" name="year" placeholder="Year in YYYY" value="{{year}}">
+            Rank: <input type="text" id="rank" name="rank" placeholder="Rank out of 10.0" value="{{rank}}">
+            <input type="submit" value="Update movie details">
+        </form>
+        
+        <script src="/js/replicate.js"></script>
+    </body>
+</html>
