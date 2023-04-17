@@ -10,6 +10,7 @@ app.get ('/', mainController.getMainPage);
 app.get ('/editMovie', mainController.getEdit);
 app.get ('/addMovie', mainController.getAdd);
 
+app.get ('/test', dbController.select)
 app.post ('/select', dbController.select);
 app.post ('/insert', dbController.insert);
 app.post ('/update', dbController.update);
