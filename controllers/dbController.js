@@ -250,7 +250,7 @@ function buildUpdateQuery (body) {
 
 function buildDeleteQuery (id) {
     const query = "DELETE FROM movies WHERE id = ?";
-    const values = [id];
+    const values = [parseInt (id)];
     return [query, values];
 }
 
@@ -399,6 +399,8 @@ const dbController = {
                             lockQuery: lockQuery,
                             lockValues: lockValues
                         });
+
+                        res.send ("success to main");
                     })
                     .catch (() => {
                         useBackup = true;
@@ -415,7 +417,9 @@ const dbController = {
                             lockQuery: lockQuery,
                             lockValues: lockValues
                         });
-                    })
+
+                        res.send ("success to backup");
+                    });
                 }
             });
         });
@@ -424,9 +428,8 @@ const dbController = {
     update: async (req, res) => {
         let useBackup = false;
         req.body = {
-            id: '1284',
-            name: '18 and Nasty Interracial 3',
-            year: '2002'
+            id: '412322',
+            rank: '7.5'
         }
 
         const [query, values] = buildUpdateQuery (req.body);
@@ -473,11 +476,11 @@ const dbController = {
     delete: async (req, res) => {
         let useBackup = false;
         req.body = {
-            id: '1284',
-            year: '2002'
+            id: '412323',
+            year: '2023'
         }
 
-        const [query, values] = buildDeleteQuery (req.body);
+        const [query, values] = buildDeleteQuery (req.body.id);
         const [lockQuery, lockValues] = buildLockQuery (req.body.id);
         const before1980 = parseInt (req.body.year) < 1980;
         awaitAllConnections () .then (results => {
