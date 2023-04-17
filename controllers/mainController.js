@@ -8,7 +8,12 @@ const mainController = {
     },
 
     getAdd: (req, res) => {
-        res.render ("add");
+        res.render ("newMovie");
+    },
+
+    showVals: (req, res) => {
+        console.log ("movie details: ");
+        console.log (req.body);
     }
 };
 
