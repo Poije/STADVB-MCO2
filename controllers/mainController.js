@@ -12,11 +12,6 @@ const mainController = {
         res.render ("newMovie");
     },
 
-    showVals: (req, res) => {
-        console.log ("movie details: ");
-        console.log (req.body);
-    },
-
     renderSearch: (req, res) => {
         res.render ('partials/searchResults', {results: req.body.results}, (err, html) => {
             res.send (html);
