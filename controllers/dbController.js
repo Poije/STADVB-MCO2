@@ -85,6 +85,13 @@ function acquireAfterConnection () {
 
 function awaitAllConnections () {
     return new Promise ((resolve, reject) => {
+        if (typeof mainConnection !== 'undefined')
+            mainConnection.close ();
+        if (typeof beforeConnection !== 'undefined') {
+            beforeConnection.close ();
+            afterConnection.close ();
+        }
+        
         Promise.allSettled ([acquireMainConnection (), acquireBeforeConnection (), acquireAfterConnection ()])
         .then (results => {
             resolve (results);
