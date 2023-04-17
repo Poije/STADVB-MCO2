@@ -101,6 +101,9 @@ function selectNodeOnYear (year) {
     });
 }
 
+function buildLockQuery (id) {
+    return ["SELECT * FROM movies WHERE id = ?", [parseInt (id)]];
+}
 function buildSelectQuery (body) {
     let nonEmptyParams = 0;
     for (const key in body) {
@@ -152,7 +155,8 @@ function buildInsertQuery (body) {
 
     values.push (body.name.trim ())
     values.push (parseInt (body.year.trim ()));
-    values.push (parseFloat (body.rank.trime ()));
+    values.push (parseFloat (body.rank.trim ()));
+    values.push (getLatestId)
     // for (let i = 0; i < keys.length; i++) {          //tinamad na ako iautomate hehe
     //     if (keys[i] === 'name' && body.name.trim ().length !== 0) {
     //         query += "name = ?";
@@ -213,12 +217,12 @@ function buildDeleteQuery (id) {
     return [query, values];
 }
 
-function performQuery (connection, connectionName, query, values) {
+function performQuery (connection, connectionName, lockQuery, lockValues, query, values) {
     return new Promise ((resolve, reject) => {
         setIsolationLevel (connectionName, "REPEATABLE READ").then (result => {
-            connection.query (query + lockCheck, values, (err, lockResult) => {
-                console.log (query + lockCheck);
-                console.log (values);
+            //NEED OWN SELECT FOR UPDATE QUERY STRING
+            connection.query (lockQuery, lockValues, (err, lockResult) => {
+                console.log ("lockErr: " + err);
                 if (lockResult.length !== 0) {
                     connection.beginTransaction (err => {
                         if (err) reject (err);
@@ -306,7 +310,7 @@ const dbController = {
         let useBackup = false;
         awaitAllConnections () .then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', query, values)
+                performQuery (mainConnection, 'main', query, values, query, values)
                 .then (() => {
                     useBackup = false;
                 })
@@ -317,7 +321,7 @@ const dbController = {
 
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
                 const before1980 = parseInt (req.body.year) < 1980
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values, query, values).then (() => {
                     useBackup = false;
                 })
             }
@@ -327,62 +331,27 @@ const dbController = {
 
     insert: async (req, res) => {
         req.body = {
-            id: 1284,
-            name: '18 and Nasty Interracial 63',
-            year: 2002
-        }
-
-        const [query, values] = buildUpdateQuery (req.body);
-        awaitAllConnections ().then (results => {
-            if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', query, values)
-                .then (() => {
-                    useBackup = false;
-                    
-                    nodeQueue.push ({
-                        query: query,
-                        values: values,
-                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
-                    });
-                })
-                .catch (() => {
-                    useBackup = true;
-                });
-            }
-
-            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
-                const before1980 = parseInt (req.body.year) < 1980
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
-                    useBackup = false;
-
-                    mainQueue.push ({
-                        query: query,
-                        values: values
-                    });
-                })
-            }
-        });
-    },
-
-    update: (req, res) => {
-        let useBackup = false;
-        req.body = {
             id: '1284',
             name: '18 and Nasty Interracial 63',
             year: '2002'
         }
 
         const [query, values] = buildUpdateQuery (req.body);
+        const [lockQuery, lockValues] = buildLockQuery (req.body.id);
+        const before1980 = parseInt (req.body.year) < 1980;
+        let useBackup = false;
         awaitAllConnections ().then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', query, values)
+                performQuery (mainConnection, 'main', lockQuery, lockValues, query, values)
                 .then (() => {
                     useBackup = false;
                     
                     nodeQueue.push ({
                         query: query,
                         values: values,
-                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
+                        node: before1980 ? 'before' : 'after',
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
                     });
                 })
                 .catch (() => {
@@ -391,32 +360,91 @@ const dbController = {
             }
 
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
-                const before1980 = parseInt (req.body.year) < 1980
                 performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
                     useBackup = false;
 
                     mainQueue.push ({
                         query: query,
-                        values: values
+                        values: values,
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
                     });
                 })
             }
         });
     },
 
-    delete: (req, res) => {
-        const [query, values] = buildDeleteQuery (req.body);
+    update: async (req, res) => {
         let useBackup = false;
-        awaitAllConnections () .then (results => {
+        req.body = {
+            id: '1284',
+            name: '18 and Nasty Interracial 3',
+            year: '2002'
+        }
+
+        const [query, values] = buildUpdateQuery (req.body);
+        const [lockQuery, lockValues] = buildLockQuery (req.body.id);
+        const before1980 = parseInt (req.body.year) < 1980;
+
+        awaitAllConnections ().then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', query, values)
+                performQuery (mainConnection, 'main', lockQuery, lockValues, query, values)
                 .then (() => {
                     useBackup = false;
                     
                     nodeQueue.push ({
                         query: query,
                         values: values,
-                        node: (parseInt (req.body.year) < 1980) ? 'before' : 'after'
+                        node: before1980 ? 'before' : 'after',
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
+                    });
+
+                })
+                .catch (() => {
+                    useBackup = true;
+                });
+            }
+
+            if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', lockQuery, lockValues, query, values).then (() => {
+                    useBackup = false;
+
+                    mainQueue.push ({
+                        query: query,
+                        values: values,
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
+                    });
+
+                    console.log (mainQueue);
+                })
+            }
+        });
+    },
+
+    delete: async (req, res) => {
+        let useBackup = false;
+        req.body = {
+            id: '1284',
+            year: '2002'
+        }
+
+        const [query, values] = buildDeleteQuery (req.body);
+        const [lockQuery, lockValues] = buildLockQuery (req.body.id);
+        const before1980 = parseInt (req.body.year) < 1980;
+        awaitAllConnections () .then (results => {
+            if (results[0].status !== 'rejected') {     //main node is down
+                performQuery (mainConnection, 'main', lockQuery, lockValues, query, values)
+                .then (() => {
+                    useBackup = false;
+                    
+                    nodeQueue.push ({
+                        query: query,
+                        values: values,
+                        node: before1980 ? 'before' : 'after',
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
                     });
                 })
                 .catch (() => {
@@ -425,19 +453,57 @@ const dbController = {
             }
 
             if (results[0].status === 'rejected' || useBackup) {      //use backup nodes
-                const before1980 = parseInt (req.body.year) < 1980
-                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values).then (() => {
+                performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', lockQuery, lockValues, query, values).then (() => {
                     useBackup = false;
 
                     mainQueue.push ({
                         query: query,
-                        values: values
+                        values: values,
+                        lockQuery: lockQuery,
+                        lockValues: lockValues
                     });
                 })
             }
         });
 
         res.render ('index2');
+    },
+
+    replicate: async (req, res) => {
+        awaitAllConnections () .then (results => {
+            while (nodeQueue.length !== 0 || mainQueue.length !== 0) {
+                if (nodeQueue.length !== 0) {
+                    const transaction = nodeQueue[0];
+                    const connection = (transaction.node === 'before') ? beforeConnection : afterConnection;
+                    performQuery (connection, transaction.node, transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+                    .then (() => {
+                        nodeQueue.shirt ();
+                        res.send ("succeeded in replicating to " + transaction.node + " node.");
+                        return;
+                    })
+                    .catch (() => {
+                        res.send ("failed to replicate to " + transaction.node + " node.");
+                    })
+                }
+
+                if (mainQueue.length !== 0) {
+                    const transaction = mainQueue[0];
+                    performQuery (mainConnection, 'main', transaction.lockQuery, transaction.lockValues, transaction.query, transaction.values)
+                    .then (() => {
+                        mainQueue.shift ();
+                        res.send ("succeeded in replicating to main");
+                        return;
+                    })
+                    .catch (() => {
+                        res.send ("failed to replicate to main");
+                        return;
+                    });
+                }
+            }
+
+            res.send ("all nodes are up to date");
+            return;
+        });
     }
 };
 
