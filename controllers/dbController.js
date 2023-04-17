@@ -29,9 +29,9 @@ poolCluster.add ('AFTER1980', connectionAfter1980);
 let mainConnection;
 let beforeConnection;
 let afterConnection;
-let connectionToUse;
-const limitCount = " LIMIT 1000;";
-const lockCheck = " FOR UPDATE;";
+
+const limitCount = " LIMIT 50";
+const lockCheck = " FOR UPDATE";
 let nodeQueue = [];
 let mainQueue = [];
 
@@ -132,14 +132,14 @@ function buildLockQuery (id) {
 function buildSelectQuery (body) {
     let nonEmptyParams = 0;
     for (const key in body) {
-        if (body.key !== '')
+        if (body[key] !== '')
             nonEmptyParams++;
     }
     console.log ("Param count: " + nonEmptyParams);
     if (nonEmptyParams == 0)
         return (["SELECT * FROM movies", []]);
     else {
-        const keys = Object.keys (body);
+        const keys = Object.keys (body).filter (key => body[key] !== '');
         let query = "SELECT * FROM movies WHERE ";
         let values = [];
         for (let i = 0; i < keys.length; i++) {
@@ -169,7 +169,7 @@ function buildSelectQuery (body) {
             }
         }
 
-        return ([query + limitCount, values]);
+        return ([query, values]);
     }
 }
 
@@ -340,15 +340,14 @@ function setIsolationLevel (connection, level) {
 
 const dbController = {
     select: async (req, res) => {
-        req.body = {        //test req body
-            year: '2023'
-        };
-
         const [query, values] = buildSelectQuery (req.body);
         let useBackup = false;
         awaitAllConnections () .then (results => {
             if (results[0].status !== 'rejected') {     //main node is down
-                performQuery (mainConnection, 'main', query, values, query, values)
+                console.log (query);
+                console.log (values);
+
+                performQuery (mainConnection, 'main', query + limitCount + lockCheck, values, query + limitCount, values)
                 .then ((results) => {
                     res.send (results);
                     useBackup = false;
@@ -364,6 +363,7 @@ const dbController = {
                 performQuery (before1980 ? beforeConnection : afterConnection, before1980 ? 'before' : 'after', query, values, query, values).then ((results) => {
                     res.send (results);
                     useBackup = false;
+                    return;
                 })
             }
         });
@@ -422,11 +422,8 @@ const dbController = {
 
     update: async (req, res) => {
         let useBackup = false;
-        req.body = {
-            id: '412322',
-            rank: '7.5'
-        }
 
+        console.log (req.body);
         const [query, values] = buildUpdateQuery (req.body);
         const [lockQuery, lockValues] = buildLockQuery (req.body.id);
         const before1980 = parseInt (req.body.year) < 1980;
@@ -445,6 +442,8 @@ const dbController = {
                         lockValues: lockValues
                     });
 
+                    res.redirect ('/');
+
                 })
                 .catch (() => {
                     useBackup = true;
@@ -462,7 +461,7 @@ const dbController = {
                         lockValues: lockValues
                     });
 
-                    console.log (mainQueue);
+                    res.redirect ('/');
                 })
             }
         });
@@ -470,11 +469,8 @@ const dbController = {
 
     delete: async (req, res) => {
         let useBackup = false;
-        req.body = {
-            id: '412324',
-            year: '2023'
-        }
 
+        console.log (req.body);
         const [query, values] = buildDeleteQuery (req.body.id);
         const [lockQuery, lockValues] = buildLockQuery (req.body.id);
         const before1980 = parseInt (req.body.year) < 1980;
@@ -511,7 +507,7 @@ const dbController = {
             }
         });
 
-        res.render ('index2');
+        res.redirect ('/');
     },
 
     replicate: async (req, res) => {
